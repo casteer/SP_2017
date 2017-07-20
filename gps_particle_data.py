@@ -549,7 +549,16 @@ class meta_search:
                 current_date = datetime(self.satellites_data[-1].current_year,self.satellites_data[-1].current_month,self.satellites_data[-1].current_day);
                 finished = current_date>end_date;
                 print (not finished)
-            
+        
+    # Returns the data selected by the 
+    def get_data(self, key_varname):
+        for s in searches:         
+            for fn in s.key_filenames:
+                    print s.indices[][key_varname];
+                
+        
+        
+        
             
 
 d = datetime(4,12,26);
@@ -573,7 +582,7 @@ end_date = datetime(05,1,1);
 start_date.day
 
 ms.load_data(start_date,end_date);
-#ms.apply_search(e);
+ms.apply_search(e);
 
 
 #==============================================================================
