@@ -24,27 +24,32 @@ class gps_particle_datafile():
         # Generate the basepath and filename 
         self.basepath = self.folder_path();
         self.data_filename = self.file_path();
+        self.fail_load=False;
         
         # Check if the file is available locally in this folder?
         exist_test = os.path.isfile(self.data_filename);
         if(not exist_test):
             # No it's been downloaded so download it
             print 'Downloading ' + self.data_filename;
-            self.download();
+            if(self.download()):
+                self.fail_load=True;
+                return;
         else:
             print 'File ' + self.data_filename + ' already exists ';
+            
+        if(not self.fail_load):
+    
+            # Create the JSON header file
+            self.json_filename = self.create_json();
+            
+            # Read the data from the file 
+            self.data = self.read();
 
-        # Create the JSON header file
-        self.json_filename = self.create_json();
-
-        # Read the data from the file 
-        self.data = self.read();
-
-        # Create the summary of the data for searching
-        self.summary = self.gps_particle_datafile_summary(self.data);
-        # self.summary.print_summary();
-
-
+            # Create the summary of the data for searching
+            self.summary = self.gps_particle_datafile_summary(self.data);
+            
+            # self.summary.print_summary();
+        
     # Return a string with the path to the data on the web
     def folder_path(self):
         # Add check on whether the satellite number is sensible here.
@@ -204,23 +209,23 @@ class gps_satellite_data():
         # Get the current size of the dataset list 
         curr_len = len(self.dataset);
 
-        # Get the first and last day of the current datafile
+        # Get the first and last day of the current datafile        
         first_day = int(math.ceil(self.dataset[-1].summary.min_decimal_day));
         last_day = int(math.ceil(self.dataset[-1].summary.max_decimal_day));
-        
+            
         # For the 2004-2005 new year, the decimal day goes negative 
         # across the end of year boundary ... need to investigate why this is? 
         if(last_day<0):
             last_day = 1+int(math.ceil(np.max(self.dataset[-1].data["decimal_day"])));
 
-        print first_day;
-        print last_day;
+        # print first_day;
+        # print last_day;
 
         # Convert the decimal day to month and the day
         epoch = datetime(2000+self.current_year - 1, 12, 31);
         result = epoch + timedelta(days=last_day);
 
-        print result; 
+        # print result; 
         self.dataset[-1].summary.print_summary();
             
         # Find the new month and day
@@ -321,52 +326,119 @@ class search():
         self.satellite_data = satellite_data;
         self.event = event;
         self.indices = dict();# dictionary of sets of indices of the dataset, keyed by filename
-
-
-
-    def find_zero_crossing(self,data):
-        signed_data = np.sign(data);
-        pos = signed_data>0;
-        npos = ~pos;        
-        pos2neg_cross = np.bitwise_and(npos[:-1],pos[1:]);
-        neg2pos_cross= np.bitwise_and(pos[:-1], npos[1:]);
-        crossings = np.bitwise_or(pos2neg_cross, neg2pos_cross);
-        return crossings;
+        self.key_varnames = set();
+        self.key_filenames = set();
         
-    def compare_with_zerocrossing(self,key_varnames):
-        
+        # Initialise indices array
         for sat_data in satellite_data.dataset[:]:
+            # Create new set in the indices dictionary
+            key_filename = sat_data.data_filename[:-12];
+            self.key_filenames.add(key_filename);
+            self.indices[key_filename] = dict();
+
+        self.compare_with_zerocrossing(["decimal_day"]);
+
+    def remove_empty_sets(self):
+        # Print indices         
+        for key_filename in self.key_filenames:
+            for key_varname in self.key_varnames:
+                if(self.indices[key_filename][key_varname]==set()):
+                    print "Deleting " + key_filename + " " + key_varname;
+                    del self.indices[key_filename][key_varname];
+                    
+            
+        
+        
+    def get_indices_in_time_window(self, time_window_in_days):
+        
+        # For each search variable 
+        for sat_data in self.satellite_data.dataset[:]:
  
             # Create new set in the indices dictionary
             key_filename = sat_data.data_filename[:-12];
-                
-                
-            count=0;
-            var_sets={};
-            self.indices[key_filename] = set();
-            for key_varname in key_varnames:
+            
+            new_indices = set();
+            for index in self.indices[key_filename]["decimal_day"]:
 
+                decimal_day_event = self.event.data["decimal_day"];
+                decimal_day_data = sat_data.data["decimal_day"][index];
+                    
+                upper_index=0;
+                while(((upper_index+index)>0) and (math.fabs(decimal_day_data - decimal_day_event)<time_window_in_days)):
+                    # print index, upper_index, decimal_day_data, decimal_day_event;
+                    if(not ((index+upper_index) in self.indices[key_filename]["decimal_day"])):
+                        new_indices.add(index+upper_index);                    
+                    
+                    upper_index-=1;
+                    decimal_day_data = sat_data.data["decimal_day"][index+upper_index];
+
+
+                upper_index=0;
+                decimal_day_data = sat_data.data["decimal_day"][index];
+                while (math.fabs(decimal_day_data - decimal_day_event)<time_window_in_days):
+                    # print index,index+upper_index, decimal_day_data, decimal_day_event;
+                    
+                    if(not ((index+upper_index) in self.indices[key_filename]["decimal_day"])):
+                        new_indices.add(index+upper_index);                    
+                    
+                    upper_index+=1;                    
+                    decimal_day_data = sat_data.data["decimal_day"][index+upper_index];
+                    
+                    
+            for ind in new_indices:
+                self.indices[key_filename]["decimal_day"].add(ind);
+
+            print;                
+            print key_filename;
+            print self.indices[key_filename];
+            
+            if (self.indices[key_filename]["decimal_day"]!=set()):            
+                print min(sat_data.data["decimal_day"][ list(self.indices[key_filename]["decimal_day"])])
+                print max(sat_data.data["decimal_day"][ list(self.indices[key_filename]["decimal_day"])])
+
+    # This find the closest value to the event's value for the same keyname        
+    def compare_with_zerocrossing(self,key_varnames):
+        
+        for sat_data in self.satellite_data.dataset[:]:
+ 
+            # Create new set in the indices dictionary
+            key_filename = sat_data.data_filename[:-12];
+
+            for key_varname in key_varnames:
+                
+                self.key_varnames.add(key_varname);
                 self.indices[key_filename][key_varname] = set();
                
-                #                        var_sets[count] = set();
-               
                 # Get the satellite's data
-               
                 sat_data_array = sat_data.data[key_varname];
-               
                 retain=False;
-                old_sign = 1;
-                new_sign = 1;
+
+                # Get the sign of the first datapoint 
+                del_data = (sat_data_array[0]-self.event.data[key_varname])  ;
+                new_sign1 = np.sign(del_data);
                 
                 # Search for sign change in the difference
                 for index,sat_data_element in enumerate(sat_data_array):
 
-                    old_sign = new_sign;
+                    old_sign = new_sign1;
                     
                     del_data = (sat_data_element-self.event.data[key_varname])  ;
-                    new_sign = np.sign(del_data);
-                    
-                    if(new_sign!=old_sign):
+                    new_sign1 = np.sign(del_data);
+
+                    # Check for crossing new year boundary in "decimal_day" data
+                    if(key_varname=="decimal_day"):
+
+                        startOfThisYear = datetime(year=self.event.date.year, month=1, day=1);
+                        startOfNextYear = datetime(year=self.event.date.year+1, month=1, day=1);
+                        days_in_year = float((startOfNextYear-startOfThisYear).days);       
+
+                        del_data = (sat_data_element+days_in_year-self.event.data[key_varname]);
+                        new_sign2 = np.sign(del_data);
+
+                    else:
+                        new_sign2 = new_sign1;
+                        
+                    if((new_sign1!=old_sign) and (new_sign2==new_sign1)):
                         retain=True;
                         
                     # Check for change of sign, ignore sign change at start of datafile
@@ -374,22 +446,30 @@ class search():
                         self.indices[key_filename][key_varname].add(index);
                         # var_sets[count].add(index);
                         retain=False;
-                count+=1;
                
                 
-            # Save the set of indices of datapoints that are common to all search terms
-            # self.indices[key_filename] = var_sets[0];
-            # for iset in np.arange(1,count):
-            #    self.indices[key_filename].intersection_update(var_sets[iset]);
-
-            # Print indices
-            print key_filename
-            print self.indices[key_filename];
                     
             # print sat_lat[indices];
 # print long_zero_crossings;
                     
+        self.print_indices();
         return 0;
+    
+    def print_indices(self):
+        # Print indices         
+        for key_filename in self.key_filenames:
+            print;
+            print key_filename;
+            print self.indices[key_filename];
+        
+    def intersect_indices_set(self):
+        # Save the set of indices of datapoints that are common to all search terms
+        for key_filename in self.key_filenames:
+            self.indices[key_filename]["intersection"] = self.indices[key_filename]["decimal_day"];
+            for key_varname in self.key_varnames:
+                self.indices[key_filename]["intersection"].intersection_update(self.indices[key_filename][key_varname]);
+                print key_filename,key_varname, len(self.indices[key_filename]["intersection"])
+        self.key_varnames.add("intersection");
     
     def compare_with_tolerance(self,key_varnames,tol=1e-4):
         
@@ -430,38 +510,97 @@ class search():
                 self.indices[key_filename].intersection_update(var_sets[iset]);
 
             # Print indices
-            print key_filename
-            print self.indices[key_filename];
+            self.print_indices();
                     
             # print sat_lat[indices];
 # print long_zero_crossings;
                     
         return 0;
-                
 
-# satellite_data = gps_satellite_data(41,21,12,8);
-satellite_data = gps_satellite_data(41,19,12,04);
-# satellite_data.save_disk_space=True;
-for i in np.arange(0,5):
-    satellite_data.get_next_datafile();
+# This holds all of the data that searches over all satellites
+class meta_search:
+    def __init__(self,satellites_list):
+        
+        self.satellites = satellites_list;
+        self.satellites_data = list();
+        self.searches = list();
+
+    # Searches for a single event over all satellites between the dates
+    def apply_search(self,this_event):
+
+        for sats_data in self.satellites_data:
+            searches.append(search(this_event,sats_data));
+        
+        
+    def load_data(self,start_date,end_date):
+        
+        for this_sat in self.satellites:
+            # Extract the day,month,year from the start and end dates
+            self.satellites_data.append(gps_satellite_data(this_sat,start_date.day,start_date.month,start_date.year));
+        
+            # Keeping downloading/reading data until beyond the desired end date            
+            current_date = datetime(self.satellites_data[-1].current_year,self.satellites_data[-1].current_month,self.satellites_data[-1].current_day);
+            finished = current_date>end_date;
+
+            while ((not finished) and (not self.satellites_data[-1].dataset[-1].fail_load)):
+                self.satellites_data[-1].get_next_datafile();
+                
+                # Update end condition 
+                current_date = datetime(self.satellites_data[-1].current_year,self.satellites_data[-1].current_month,self.satellites_data[-1].current_day);
+                finished = current_date>end_date;
+                print (not finished)
+            
+            
+
+d = datetime(4,12,26);
+print d.date
+
+                
+sats = list();
+sats.append(41);
+for i in np.arange(54,61): 
+    sats.append(i);
+    
+ms = meta_search(sats);
 
 e = event("Boxing Day Earthquake");
 e.add_date(mins=59,hh=00,dd=26,mm=12,yy=04);
 e.add_data("Geographic_Latitude",3.24);
 e.add_data("Geographic_Longitude",95.8);
-# e.add_data("Rad_Re",130);
 
-s = search(e,satellite_data);
-#s.compare(["Geographic_Latitude","Geographic_Longitude", "decimal_day"]);
-print satellite_data.dataset[1].data["Geographic_Latitude"][25:100]
-print satellite_data.dataset[0].data["Geographic_Latitude"][25:100]
-print "==================================================================="
-s.compare_with_zerocrossing(["Geographic_Latitude"]);
-print "==================================================================="
-s.compare_with_zerocrossing(["Geographic_Longitude"]);
-print "==================================================================="
-# print satellite_data.dataset[-1].data.get("Geographic_Latitude");
+start_date = datetime(04,12,19);
+end_date = datetime(05,1,1);
+start_date.day
+
+ms.load_data(start_date,end_date);
+#ms.apply_search(e);
 
 
+#==============================================================================
+# satellites_data = list();
+# 
+# searches = list();
+# for this_sat in sats:
+#     
+# 
+#     # satellite_data.save_disk_space=True;
+#     for i in np.arange(0,5):
+#         satellites_data[-1].get_next_datafile();
+# 
+#     # e.add_data("Rad_Re",130);
+# 
+# 
+#     searches.append(search(e,satellites_data[-1]));
+#     print "==================================================================="
+#     searches[-1].compare_with_zerocrossing(["Geographic_Latitude"]);
+#     print "==================================================================="
+#     searches[-1].get_indices_in_time_window(0.5);
+#     searches[-1].intersect_indices_set();
+#     print "==================================================================="
+#     searches[-1].print_indices();
+#     searches[-1].remove_empty_sets();
+#     searches[-1].print_indices();
+#     
+#==============================================================================
 
 
