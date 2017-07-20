@@ -88,6 +88,7 @@ class gps_particle_datafile():
         # Check if we've downloaded the 404 notice or actual data
         fs = self.file_size(self.data_filename);#This throws an error when wget hasn't finished 
         if(fs<10000):
+            print;
             print('Check the filename as the returned file appears too small');
             print('... deleting file');
             os.remove(self.data_filename);
@@ -197,6 +198,7 @@ class gps_satellite_data():
         self.current_day=day;
         self.current_month=month;
         self.current_year=year;
+
 
         # Delete the file if this flag is set                
         if(self.save_disk_space):
@@ -452,7 +454,7 @@ class search():
             # print sat_lat[indices];
 # print long_zero_crossings;
                     
-        self.print_indices();
+        # self.print_indices();
         return 0;
     
     def print_indices(self):
@@ -510,81 +512,114 @@ class search():
                 self.indices[key_filename].intersection_update(var_sets[iset]);
 
             # Print indices
-            self.print_indices();
-                    
-            # print sat_lat[indices];
-# print long_zero_crossings;
+            # self.print_indices();
                     
         return 0;
 
 # This holds all of the data that searches over all satellites
 class meta_search:
-    def __init__(self,satellites_list):
+    def __init__(self):
+        self.satellites = list();
+        self.satellites.append(41);
+        self.satellites.append(48);
+        for i in np.arange(53,74): 
+            self.satellites.append(i);
         
-        self.satellites = satellites_list;
         self.satellites_data = list();
         self.searches = list();
 
     # Searches for a single event over all satellites between the dates
     def apply_search(self,this_event):
-
         for sats_data in self.satellites_data:
-            searches.append(search(this_event,sats_data));
-        
+            self.searches.append(search(this_event,sats_data));
+
+    def extend_time_window(self,time_window_in_days):
+        for s in self.searches:
+            s.get_indices_in_time_window(time_window_in_days);
         
     def load_data(self,start_date,end_date):
         
         for this_sat in self.satellites:
+            
             # Extract the day,month,year from the start and end dates
             self.satellites_data.append(gps_satellite_data(this_sat,start_date.day,start_date.month,start_date.year));
+            
+            if(self.satellites_data[-1].dataset[-1].fail_load):
+                del self.satellites_data[-1];# Failed to load so remove it from the list
         
             # Keeping downloading/reading data until beyond the desired end date            
             current_date = datetime(self.satellites_data[-1].current_year,self.satellites_data[-1].current_month,self.satellites_data[-1].current_day);
             finished = current_date>end_date;
 
             while ((not finished) and (not self.satellites_data[-1].dataset[-1].fail_load)):
-                self.satellites_data[-1].get_next_datafile();
-                
+                self.satellites_data[-1].get_next_datafile();                
                 # Update end condition 
                 current_date = datetime(self.satellites_data[-1].current_year,self.satellites_data[-1].current_month,self.satellites_data[-1].current_day);
                 finished = current_date>end_date;
-                print (not finished)
         
     # Returns the data selected by the 
-    def get_data(self, key_varname):
-        for s in searches:         
-            for fn in s.key_filenames:
-                    print s.indices[][key_varname];
-                
+    def get_selected_data(self, key_varname):
+        output_data = dict();
         
-        
-        
+        if(self.searches==list()):
+            print "Error! meta-search::get_selected_data() - No Searches Performed"
+            return 1;
+
+        # Loop over all applied searches, each search is the same satellite but over time 
+        for isearch,s in enumerate(self.searches):         
             
-
-d = datetime(4,12,26);
-print d.date
-
+            # Get the filenames
+            for fn in s.key_filenames:
                 
-sats = list();
-sats.append(41);
-for i in np.arange(54,61): 
-    sats.append(i);
+                # Check if the indices set is empty 
+                if(s.indices[fn][key_varname]!=set()):
+                    
+                        for dataset in self.satellites_data[isearch].dataset:
+                            if(dataset.data_filename[0:-12]==fn):
+                                output_data[fn] = dict();
+                                for ikey in dataset.data.keys():
+                                    output_data[fn][ikey] = list();
+                                    for index in s.indices[fn][key_varname]:
+                                        output_data[fn][ikey].append(dataset.data[ikey][index]);
+
+        self.selected_data = output_data;                    
+        return output_data;        
+        
+        
     
-ms = meta_search(sats);
-
-e = event("Boxing Day Earthquake");
-e.add_date(mins=59,hh=00,dd=26,mm=12,yy=04);
-e.add_data("Geographic_Latitude",3.24);
-e.add_data("Geographic_Longitude",95.8);
-
-start_date = datetime(04,12,19);
-end_date = datetime(05,1,1);
-start_date.day
-
-ms.load_data(start_date,end_date);
-ms.apply_search(e);
-
-
+#==============================================================================
+# d = datetime(4,12,26);
+# print d.date
+# 
+#                 
+#     
+# ms = meta_search();
+# 
+# e = event("Boxing Day Earthquake");
+# e.add_date(mins=59,hh=00,dd=26,mm=12,yy=04);
+# e.add_data("Geographic_Latitude",3.24);
+# e.add_data("Geographic_Longitude",95.8);
+# 
+# start_date = datetime(04,12,19);
+# end_date = datetime(05,1,1);
+# 
+# ms.load_data(start_date,end_date);
+# ms.apply_search(e);
+# ms.extend_time_window(0.5);
+# 
+# output_data = ms.get_selected_data("decimal_day");
+# 
+# for fn in output_data.keys():
+#     print;
+#     print;
+#     print fn;
+#     for ikey in output_data[fn].keys():
+#         print ikey;
+#         print output_data[fn][ikey][0];
+#         print output_data[fn][ikey][-1];
+# 
+# 
+#==============================================================================
 #==============================================================================
 # satellites_data = list();
 # 
