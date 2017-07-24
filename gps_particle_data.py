@@ -199,7 +199,6 @@ class gps_satellite_data():
         self.current_month=month;
         self.current_year=year;
 
-
         # Delete the file if this flag is set                
         if(self.save_disk_space):
             print 'Saving disk space, deleting file : ', self.dataset[0].data_filename;
@@ -319,7 +318,7 @@ class event():
         
 # Defines a data search 
 class search():
-    def __init__(self, event, satellite_data):
+    def __init__(self, event, satellite_data,tol=0):
         
         # Create the indices of the satellites
         # self.satellites = np.arange(53,74);
@@ -338,7 +337,7 @@ class search():
             self.key_filenames.add(key_filename);
             self.indices[key_filename] = dict();
 
-        self.compare_with_zerocrossing(["decimal_day"]);
+        self.compare(["decimal_day"],tol);
 
     def remove_empty_sets(self):
         # Print indices         
@@ -473,19 +472,17 @@ class search():
                 print key_filename,key_varname, len(self.indices[key_filename]["intersection"])
         self.key_varnames.add("intersection");
     
-    def compare_with_tolerance(self,key_varnames,tol=1e-4):
+    def compare_with_tolerance(self,key_varnames,tol):
         
-        for sat_data in satellite_data.dataset[:]:
+        for sat_data in self.satellite_data.dataset[:]:
  
             # Create new set in the indices dictionary
             key_filename = sat_data.data_filename[:-12];
-                
-            self.indices[key_filename] = set();
-                
-            count=0;
-            var_sets={};
+
             for key_varname in key_varnames:
-                var_sets[count] = set();
+                
+                self.key_varnames.add(key_varname);
+                self.indices[key_filename][key_varname] = set();
 
                 # Get the satellite's data
                 sat_data_array = sat_data.data[key_varname];
@@ -494,27 +491,23 @@ class search():
                 # Search for sign change in the difference
                 for index,sat_data_element in enumerate(sat_data_array):
 
-                    del_data = math.fabs(sat_data_element-self.event.data[key_varname])/math.fabs(sat_data_element);
+                    del_data = math.fabs(sat_data_element-self.event.data[key_varname]);
                     
                     if(del_data<tol):
                         retain=True;
                         
                     # Check for change of sign, ignore sign change at start of datafile
                     if(retain):
-                        var_sets[count].add(index);
+                        self.indices[key_filename][key_varname].add(index);
                         retain=False;
-                count+=1;
-               
                 
-            # Save the set of indices of datapoints that are common to all search terms
-            self.indices[key_filename] = var_sets[0];
-            for iset in np.arange(1,count):
-                self.indices[key_filename].intersection_update(var_sets[iset]);
-
-            # Print indices
-            # self.print_indices();
-                    
         return 0;
+
+    def compare(self,key_varnames,tol=0):
+        if(tol==0):
+            self.compare_with_zerocrossing(key_varnames);
+        else:
+            self.compare_with_tolerance(key_varnames,tol);
 
 # This holds all of the data that searches over all satellites
 class meta_search:
@@ -529,9 +522,9 @@ class meta_search:
         self.searches = list();
 
     # Searches for a single event over all satellites between the dates
-    def apply_search(self,this_event):
+    def apply_search(self,this_event, tol=0):
         for sats_data in self.satellites_data:
-            self.searches.append(search(this_event,sats_data));
+            self.searches.append(search(this_event,sats_data,tol));
 
     def extend_time_window(self,time_window_in_days):
         for s in self.searches:
